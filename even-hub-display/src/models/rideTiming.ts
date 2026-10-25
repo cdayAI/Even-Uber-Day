@@ -110,6 +110,12 @@ export function computeEta(ride: RideData, now: number = Date.now()): EtaState {
     return { minutesRemaining: null, label: 'CANCELLED', overdue: false }
   }
 
+  if (!isCoord(ride.etaMinutes)) {
+    // On the way, but nobody has said how long — a first paste from a screen
+    // with no minutes on it. Counting down from nothing would read ARRIVING.
+    return { minutesRemaining: null, label: 'ON THE WAY', overdue: false }
+  }
+
   const minutesRemaining = countdown(ride.etaMinutes, ride.timestamp, now)
 
   if (minutesRemaining === null) {
