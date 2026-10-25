@@ -105,6 +105,16 @@ Every update crosses a Bluetooth LE link, so:
 - The map image is re-sent only when the coordinates or ETA actually change.
   It is by far the most expensive payload.
 
+The renderer also **repaints itself every 10 seconds**, because the ETA counts
+down from the ride's timestamp while no new data arrives — in the standalone
+app nothing new comes in between pastes. A refresh that changes nothing sends
+nothing; one that rolls the minute over sends the ETA line (and, before
+pickup, the map, whose range ring tracks the ETA).
+
+It also keeps the latest ride from before the page exists. On reopen the ride
+is restored from storage before the host hands over the bridge; the page used
+to come up on the idle screen and stay there until something changed.
+
 ## ✅ Verified on hardware (G2 + iPhone, October 2026)
 
 - **Image byte format:** 8-bit grayscale (`RASTER_FORMAT = 'grayscale'`) renders

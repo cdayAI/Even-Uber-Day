@@ -1,60 +1,52 @@
 # Even Uber – Even Hub Display App
 
-React + TypeScript web app that displays Uber ride tracking on Even Reality G2 smart glasses.
+React + TypeScript app that shows an Uber ride on Even Realities G2 glasses. It
+runs inside the Even App's WebView on the phone and draws to the glasses
+through the Even Hub SDK.
 
-## Overview
+**The React UI is a phone-side preview — it never reaches the glasses.** The
+glasses get a separate six-container page built in [`src/glasses/`](src/glasses/);
+see [`GLASSES_RENDERING.md`](GLASSES_RENDERING.md).
 
-This web app:
-1. Receives parsed ride data from the iOS companion app (via HTTP POST)
-2. Displays a beautiful, optimized UI for 576x288 monochrome green micro-LED
-3. Sends the rendered view to G2 via the Even Hub SDK
-4. Updates in real-time as new notifications arrive
+## Two ways to run
 
-## Requirements
+| Mode | What holds the ride | Used for |
+|---|---|---|
+| **Standalone** (`.ehpk`) | The page itself, persisted to `localStorage` | Real use. No PC or server. Ride details come from **Paste from Uber** — see [`SHORTCUT.md`](SHORTCUT.md) — or the built-in **Simulate a ride**. |
+| **Dev server** | `server.ts` (Express, port 3000) | Development. Accepts `POST /api/ride-update` from curl, the iOS companion app or the Uber backend. |
 
-- **Node.js 18+**
-- **npm** or **yarn**
-- **Even Hub SDK** (@evenrealities/even_hub_sdk)
-- **React 18+**
-- **TypeScript 5+**
+The app picks a mode at startup by asking for `/health`: a dev server answers,
+the packaged app has nothing there. Both modes apply the same validation,
+merging and expiry rules (`src/models/rideStore.ts`).
 
-## Quick Start
+## Setup
 
-### 1. Install Dependencies
+Requires Node.js 20.19+ or 22.12+ (Vite 7's floor). CI uses 22.
 
 ```bash
 cd even-hub-display
-npm install
+npm ci
 ```
 
-### 2. Start Development Server
+Use `npm ci`, not `npm install`. `package-lock.json` is committed; a fresh
+resolve crashes npm 10's resolver on an optional-peer cycle in vitest. If you
+change dependencies, regenerate the lockfile with npm 11 (`npx npm@11 install`).
+
+## Commands
 
 ```bash
-npm run dev
+npm run dev          # Vite UI on 127.0.0.1:5173 + API on 127.0.0.1:3000
+npm run dev:glasses  # Same, with Vite on 0.0.0.0 so the Even App can load it
+npm run qr           # QR code for the dev URL — scan it in the Even App
+npm test             # Unit tests (vitest)
+npm run type-check   # App and server
+npm run build        # Type-check + production build into dist/
+npm run pack         # Build, then package dist/ as EvenUber.ehpk
 ```
 
-This starts two processes:
+## Trying it in a browser
 
-- **Express API** on `http://127.0.0.1:3000` — the endpoint the iOS companion
-  app posts to, and the server that hosts the production bundle.
-- **Vite dev server** on `http://127.0.0.1:5173` — the UI with hot reload.
-
-### 3. Check Connection
-
-Open your browser and visit:
-```
-http://127.0.0.1:5173/
-```
-
-You should see a status page saying "Waiting for ride data..."
-
-For the production bundle instead, run `npm run build && npm start` and visit
-`http://127.0.0.1:3000/`. The API always lives on port 3000 — that address is
-hardcoded in the iOS app.
-
-### 4. Send Test Data
-
-From another terminal, send a test ride notification:
+Run `npm run dev`, open http://127.0.0.1:5173/, then push a ride:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/ride-update \
@@ -67,373 +59,66 @@ curl -X POST http://127.0.0.1:3000/api/ride-update \
     "vehicleColor": "Silver",
     "licensePlate": "ABC123",
     "etaMinutes": 3,
-    "driverLat": 37.7749,
-    "driverLng": -122.4194,
     "requesterLat": 37.7755,
     "requesterLng": -122.4180,
-    "timestamp": "2026-08-14T12:00:00Z"
+    "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"
   }'
 ```
 
-You should see the driver card appear on your screen!
+`timestamp` matters: the ETA counts down from it, and a ride stops being shown
+once it's stale (15 min en route, 5 min waiting at the pickup, 2 h on a trip,
+60 s after it ends). Add
+`"status": "arriving" | "arrived" | "ontrip" | "completed" | "cancelled"` to
+move it through its lifecycle; a bare status update merges onto the ride
+already showing. Outside the Even App the glasses layer logs that it found no
+bridge and does nothing else.
 
-## Project Structure
+### API (dev server only)
 
-```
-even-hub-display/
-├── src/
-│   ├── App.tsx                 # Main app component
-│   ├── App.css                 # Global styles
-│   ├── main.tsx                # React entry point
-│   ├── vite-env.d.ts           # Vite types
-│   ├── components/
-│   │   ├── RideCard.tsx        # Driver + vehicle info card
-│   │   ├── ETADisplay.tsx      # ETA timer and status
-│   │   ├── LocationMap.tsx     # Map showing driver vs requester
-│   │   └── StatusView.tsx      # Connection/loading state
-│   ├── models/
-│   │   └── RideData.ts         # TypeScript interfaces
-│   ├── services/
-│   │   ├── RideDataService.ts  # Receive ride data from iOS app
-│   │   └── EvenHubSync.ts      # Sync to G2 via Even Hub SDK
-│   └── hooks/
-│       └── useRideData.ts      # Custom hook for ride state
-├── public/
-│   └── index.html              # HTML entry point
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-└── README.md
-```
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/ride-update` | Apply an update. `400` if an en-route update lacks `driverName`/`etaMinutes`; `{"status":"ignored"}` for a status update with no ride to apply it to |
+| `GET /api/ride` | The active ride, or `404` |
+| `POST /api/ride-clear` | Drop the active ride |
+| `GET /api/status` | Uptime, active ride, when it was last updated |
+| `GET /health` | Health check — also how the app detects dev-server mode |
+| `POST /api/debug-log` | Glasses log lines relayed from the WebView, printed by the server |
 
-## Architecture
-
-### Data Flow
+## Layout
 
 ```
-iOS Companion App
-    ↓ (HTTP POST /api/ride-update)
-Even Hub Display App
-    ↓ (React state update)
-RideCard Component
-    ↓ (Even Hub SDK)
-G2 Smart Glasses
+src/
+├── App.tsx              # Ride source polling, history, views
+├── rideSource.ts        # Dev-server vs standalone ride storage
+├── demoRide.ts          # "Simulate a ride"
+├── components/          # Phone-side UI (PasteFromUber, RideCard, …)
+├── glasses/             # Everything that reaches the G2 — see GLASSES_RENDERING.md
+└── models/
+    ├── RideData.ts      # The ride payload, shared with server.ts
+    ├── rideStore.ts     # Validation, merging and expiry for the active ride
+    ├── rideMerge.ts     # Folding a partial update onto the current ride
+    ├── rideTiming.ts    # ETA countdown, staleness, trip distance
+    ├── rideHistory.ts   # History entries from the ride over time
+    └── uberText.ts      # Ride details from text read off the Uber screen
+server.ts                # Dev server
+app.json                 # Even Hub package manifest
 ```
 
-### Component Hierarchy
-
-```
-App
-├── StatusView                 # "Waiting for data..." or "Connected"
-├── RideCard                   # Main display
-│   ├── DriverInfo            # Name, rating, vehicle
-│   ├── ETADisplay            # ETA countdown
-│   └── LocationMap           # Map visualization
-└── (debug console)
-```
-
-## Key Files
-
-### App.tsx
-Main React component that:
-- Sets up HTTP server to receive POST requests
-- Manages ride data state
-- Renders components
-- Integrates with Even Hub SDK
-
-```typescript
-import { useState, useEffect } from 'react'
-import RideCard from './components/RideCard'
-import StatusView from './components/StatusView'
-import { RideData } from './models/RideData'
-
-export default function App() {
-  const [rideData, setRideData] = useState<RideData | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
-
-  useEffect(() => {
-    // Set up API endpoint for iOS app to POST to
-    // Display ride data when it arrives
-  }, [])
-
-  return (
-    <div className="app">
-      {!rideData ? <StatusView /> : <RideCard data={rideData} />}
-    </div>
-  )
-}
-```
-
-### RideCard.tsx
-Displays the main ride information card, optimized for 576x288 display:
-
-```typescript
-export interface RideCardProps {
-  data: RideData
-}
-
-export default function RideCard({ data }: RideCardProps) {
-  return (
-    <div className="ride-card">
-      <div className="driver-info">
-        <h1>{data.driverName}</h1>
-        <div className="rating">⭐ {data.driverRating}</div>
-        <div className="vehicle">
-          {data.vehicleColor} {data.vehicleMake} {data.vehicleModel}
-        </div>
-        <div className="plate">{data.licensePlate}</div>
-      </div>
-      
-      <div className="eta">
-        <h2>{data.etaMinutes} MINUTES AWAY</h2>
-        <p>Driver is heading to your location</p>
-      </div>
-
-      <div className="map">
-        <LocationMap
-          driverLat={data.driverLat}
-          driverLng={data.driverLng}
-          requesterLat={data.requesterLat}
-          requesterLng={data.requesterLng}
-        />
-      </div>
-    </div>
-  )
-}
-```
-
-### RideData.ts
-TypeScript interfaces matching the iOS companion app:
-
-```typescript
-export interface RideData {
-  driverName: string
-  driverRating: number
-  vehicleMake: string
-  vehicleModel: string
-  vehicleColor: string
-  licensePlate: string
-  etaMinutes: number
-  driverLat?: number
-  driverLng?: number
-  requesterLat?: number
-  requesterLng?: number
-  timestamp: string
-}
-```
-
-## Styling for G2
-
-The display is optimized for 576x288 monochrome green micro-LED:
-
-```css
-/* Optimize for green monochrome display */
-.ride-card {
-  background-color: #000000;  /* Black background */
-  color: #00FF00;             /* Bright green text */
-  font-family: monospace;     /* Crisp, readable font */
-  font-size: 16px;            /* Readable at arm's length */
-  border: 2px solid #00FF00;  /* Green border for definition */
-}
-
-/* High contrast for readability */
-.driver-info h1 {
-  font-size: 20px;
-  font-weight: bold;
-}
-
-.eta h2 {
-  font-size: 24px;
-  animation: pulse 1s infinite;  /* Draw attention to ETA */
-}
-
-/* Map simplified for small screen */
-.map {
-  width: 100%;
-  height: 120px;
-  background: #000000;
-}
-```
-
-## Even Hub SDK Integration
-
-To sync the display to G2 glasses, use the Even Hub SDK:
-
-```typescript
-import { EvenHub } from '@evenrealities/even_hub_sdk'
-
-const even = new EvenHub()
-
-// Render the app to the G2 display
-even.render(document.getElementById('root'))
-```
-
-The SDK automatically handles:
-- ✅ Rendering to 576x288 micro-LED
-- ✅ Monochrome color mapping
-- ✅ Touch input from glasses
-- ✅ Bluetooth communication
-
-## API Endpoints
-
-### POST /api/ride-update
-Receive ride data from the iOS companion app.
-
-**Request**:
-```json
-{
-  "driverName": "John D.",
-  "driverRating": 4.9,
-  "vehicleMake": "Toyota",
-  "vehicleModel": "Prius",
-  "vehicleColor": "Silver",
-  "licensePlate": "ABC123",
-  "etaMinutes": 3,
-  "driverLat": 37.7749,
-  "driverLng": -122.4194,
-  "requesterLat": 37.7755,
-  "requesterLng": -122.4180,
-  "timestamp": "2026-08-14T12:00:00Z"
-}
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "message": "Ride data updated"
-}
-```
-
-### GET /health
-Health check endpoint.
-
-**Response**:
-```json
-{
-  "status": "ok",
-  "uptime": 12345
-}
-```
-
-## Testing
-
-### Mock Notification Data
-
-Send test data without the iOS app:
+## Deploying to the glasses
 
 ```bash
-npm run test:send-mock
+npm run pack
 ```
 
-Or manually:
+produces `EvenUber.ehpk` (gitignored); see the Even Hub docs for installing a
+package. While developing, `npm run dev:glasses` + `npm run qr` loads the live
+dev build in the Even App instead.
 
-```bash
-curl -X POST http://127.0.0.1:3000/api/ride-update \
-  -H "Content-Type: application/json" \
-  -d '{...ride data...}'
-```
-
-### Local Development
-
-```bash
-npm run dev          # Start dev server with HMR
-npm run build        # Production build
-npm run preview      # Preview production build locally
-npm run lint         # Check TypeScript
-```
-
-### Browser DevTools
-
-Open `http://127.0.0.1:3000` and use Chrome DevTools to:
-- Inspect React components
-- Monitor network requests (POST from iOS app)
-- Debug state changes
-- Test responsive layout
-
-## Deployment
-
-### For G2 Hardware
-
-1. **Build for production**:
-   ```bash
-   npm run build
-   ```
-
-2. **Package with Even Hub CLI**:
-   ```bash
-   evenhub pack --output EvenUber.ehpk
-   ```
-
-3. **Deploy to G2**:
-   - Upload `.ehpk` file to Even Hub Console
-   - Sideload on device via QR code
-   - Test on hardware
-
-### For Testing on Simulator
-
-```bash
-npm run dev
-# Open evenhub-simulator locally
-# Connect to http://127.0.0.1:3000
-```
-
-## Troubleshooting
-
-### "Cannot connect to iOS app"
-- Ensure iOS companion app is running
-- Check that Even Hub app is on `http://127.0.0.1:3000`
-- Verify firewall allows localhost traffic
-- Check console for error messages
-
-### "Data not displaying"
-- Verify POST request arrives (check Network tab)
-- Check React state in DevTools
-- Inspect component props
-
-### "Map not showing"
-- Location data might be null
-- Check that lat/lng are valid coordinates
-- Verify LocationMap component renders
-
-### "Text too small/large"
-- Adjust font sizes in CSS for 576x288 display
-- Test on G2 hardware (different from desktop)
-- Use rem/em for responsive scaling
-
-## Battery Impact
-
-Optimizations for phone:
-- ✅ Updates only when data arrives (no polling)
-- ✅ Efficient React rendering
-- ✅ Minimal CPU usage (no animations by default)
-- ✅ Low network bandwidth (small JSON payloads)
-
-**Target**: < 2% battery per hour during active ride
-
-## Performance
-
-- ⚡ Load time: < 2 seconds
-- ⚡ Update latency: < 300ms from POST to display
-- ⚡ Frame rate: 60 FPS (smooth updates)
-- ⚡ Memory: < 50MB
+`vite.config.ts` pins the build target to Safari 14 / Chrome 87 — the output
+that was hardware-tested — since the bundle runs in whatever WebView the
+phone's OS provides.
 
 ## Resources
 
-- **Even Hub Docs**: https://hub.evenrealities.com/docs
-- **React Docs**: https://react.dev
-- **TypeScript Docs**: https://www.typescriptlang.org/docs
-- **Vite Docs**: https://vitejs.dev
-
-## Next Steps
-
-1. ✅ Install dependencies: `npm install`
-2. ✅ Start dev server: `npm run dev`
-3. ✅ Test with mock data
-4. ✅ Run iOS companion app
-5. ✅ Verify data flow end-to-end
-6. ✅ Test on G2 hardware
-
----
-
-**Questions?** Join the [Discord community](https://discord.gg/GsuDkKDXDe)!
+- Even Hub docs: https://hub.evenrealities.com/docs
+- Community: https://discord.gg/GsuDkKDXDe
