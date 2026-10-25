@@ -19,6 +19,10 @@ export default defineConfig({
     },
   },
   build: {
+    // Vite 4's default target, kept explicitly: Vite 7 raised its default to
+    // Safari 16, and the bundle runs in the Even App's WebView on whatever iOS
+    // the phone has. This is the output the hardware test was run against.
+    target: ['es2020', 'edge88', 'firefox78', 'chrome87', 'safari14'],
     outDir: 'dist',
     sourcemap: false,
     minify: 'terser',
