@@ -1,4 +1,31 @@
-import { RideData } from './RideData'
+import { RideData, UNKNOWN_DRIVER } from './RideData'
+import { isCoord } from './geo'
+
+/** The driver's name, or undefined when there's no real one. */
+export function namedDriver(name?: string): string | undefined {
+  return name && name !== UNKNOWN_DRIVER ? name : undefined
+}
+
+/**
+ * Fill in the fields every consumer reads.
+ *
+ * The first update of a ride is whatever its producer had: a paste from the
+ * trip screen carries no rating, car or plate. Stored as-is, the card printed
+ * "undefined" for the car and threw on the rating — and since the ride is
+ * persisted, the app stayed blank on every reopen until it expired.
+ */
+export function completeRide(ride: RideData): RideData {
+  return {
+    ...ride,
+    driverName: ride.driverName ?? '',
+    driverRating: isCoord(ride.driverRating) ? ride.driverRating : 0,
+    vehicleMake: ride.vehicleMake ?? '',
+    vehicleModel: ride.vehicleModel ?? '',
+    vehicleColor: ride.vehicleColor ?? '',
+    licensePlate: ride.licensePlate ?? '',
+    etaMinutes: isCoord(ride.etaMinutes) ? ride.etaMinutes : null
+  }
+}
 
 /**
  * Fold an incoming update onto the ride already on screen.
@@ -10,24 +37,24 @@ import { RideData } from './RideData'
  * Status, ETA and timestamp always come from the newer message.
  */
 export function mergeRide(previous: RideData | null, incoming: RideData): RideData {
-  if (!previous) return incoming
+  if (!previous) return completeRide(incoming)
 
   const preferIncoming = <T>(next: T | undefined, prev: T | undefined): T | undefined =>
     next === undefined || next === null || next === '' ? prev : next
 
   // A different driver means a different ride — don't carry anything over.
-  if (
-    incoming.driverName &&
-    previous.driverName &&
-    incoming.driverName !== previous.driverName
-  ) {
-    return incoming
+  // The stand-in name of a ride started without one isn't a driver, so the
+  // first update that does name one fills it in rather than starting afresh.
+  const incomingName = namedDriver(incoming.driverName)
+  const previousName = namedDriver(previous.driverName)
+  if (incomingName && previousName && incomingName !== previousName) {
+    return completeRide(incoming)
   }
 
   return {
     ...previous,
     ...incoming,
-    driverName: preferIncoming(incoming.driverName, previous.driverName) ?? '',
+    driverName: incomingName ?? (previous.driverName || incoming.driverName || ''),
     driverRating: incoming.driverRating || previous.driverRating,
     vehicleMake: preferIncoming(incoming.vehicleMake, previous.vehicleMake) ?? '',
     vehicleModel: preferIncoming(incoming.vehicleModel, previous.vehicleModel) ?? '',

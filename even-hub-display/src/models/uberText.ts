@@ -1,4 +1,4 @@
-import { RideData, RideStatus } from './RideData'
+import { RideData, RideStatus, UNKNOWN_DRIVER } from './RideData'
 
 /**
  * Turn text read off the Uber app — a screenshot run through iOS text
@@ -245,4 +245,22 @@ export function parseUberText(text: string, now: number = Date.now()): ParsedUbe
   }
   if (status && status !== 'enroute') found.unshift(STATUS_LABEL[status])
   return { update, found }
+}
+
+/**
+ * The update to apply for a paste.
+ *
+ * A first paste may come from any screen — mid-trip included — and may not
+ * name the driver or give a time. The store only starts a ride from a named
+ * update with an ETA, so fill those in with values that claim nothing: a
+ * stand-in name, and an unknown (not zero — zero reads ARRIVING) ETA.
+ */
+export function pasteUpdate(update: ParsedUberText['update'], hasActiveRide: boolean): RideData {
+  const ride = { ...update } as RideData
+  if (!hasActiveRide) {
+    ride.driverName ||= UNKNOWN_DRIVER
+    if (ride.etaMinutes === undefined) ride.etaMinutes = null
+    ride.status ??= 'enroute'
+  }
+  return ride
 }

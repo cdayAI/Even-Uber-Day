@@ -1,5 +1,5 @@
 import { RideData } from './RideData'
-import { mergeRide } from './rideMerge'
+import { completeRide, mergeRide } from './rideMerge'
 import { isRideStale } from './rideTiming'
 
 export type ApplyResult =
@@ -24,7 +24,9 @@ export class RideStore {
   private stored: StoredRide | null
 
   constructor(initial: StoredRide | null = null, private onChange?: (s: StoredRide | null) => void) {
-    this.stored = initial
+    // A ride persisted by an older version may be missing fields the card
+    // needs; restoring it unrepaired would crash the app on every open.
+    this.stored = initial ? { ...initial, ride: completeRide(initial.ride) } : null
   }
 
   apply(incoming: RideData, now: number = Date.now()): ApplyResult {

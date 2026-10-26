@@ -45,6 +45,8 @@ export default function RideHistory({ rides, onClear }: RideHistoryProps) {
     )
   }
 
+  const rated = rides.filter(r => r.data.driverRating > 0)
+
   // Group rides by date
   const ridesByDate = rides.reduce(
     (acc, ride) => {
@@ -83,7 +85,9 @@ export default function RideHistory({ rides, onClear }: RideHistoryProps) {
                 <div className="ride-info">
                   <div className="driver-section">
                     <div className="driver-name">{ride.data.driverName}</div>
-                    <div className="driver-rating">⭐ {formatRating(ride.data.driverRating)}</div>
+                    {ride.data.driverRating > 0 && (
+                      <div className="driver-rating">⭐ {formatRating(ride.data.driverRating)}</div>
+                    )}
                   </div>
 
                   <div className="vehicle-section">
@@ -139,11 +143,13 @@ export default function RideHistory({ rides, onClear }: RideHistoryProps) {
           <div className="stat-value">{rides.filter(r => r.endTime).length}</div>
         </div>
 
-        {rides.length > 0 && (
+        {/* Rides started from a screen with no driver card have no rating;
+            counting them as 0 would drag the average down. */}
+        {rated.length > 0 && (
           <div className="stat">
             <div className="stat-label">Avg Rating</div>
             <div className="stat-value">
-              ⭐ {(rides.reduce((sum, r) => sum + r.data.driverRating, 0) / rides.length).toFixed(1)}
+              ⭐ {(rated.reduce((sum, r) => sum + r.data.driverRating, 0) / rated.length).toFixed(1)}
             </div>
           </div>
         )}

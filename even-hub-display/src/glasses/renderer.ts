@@ -9,6 +9,15 @@ import { buildPageLayout, validateLayout } from './layout'
 import { renderMapBytes } from './rasterize'
 
 /**
+ * How often the page is re-derived with no new data.
+ *
+ * The ETA counts down from the ride's timestamp, so the minutes change while
+ * nothing new arrives — and on the phone nothing may arrive for the whole wait
+ * for pickup. A refresh only sends the lines that actually changed.
+ */
+const REFRESH_MS = 10_000
+
+/**
  * Pushes ride data to the G2 glasses.
  *
  * Lifecycle: `start()` once (creates the page), then `update()` on every ride
@@ -25,6 +34,12 @@ export class GlassesRenderer {
   private lastText: GlassesText = {}
   private lastMapKey = ''
   private unsubscribeEvents: (() => void) | null = null
+  /** The latest ride, kept so the page can be painted once it exists. */
+  private ride: RideData | null = null
+  private painting: Promise<void> = Promise.resolve()
+  private refreshTimer: ReturnType<typeof setInterval> | null = null
+  /** Bumped by `stop()`, so a `start()` still waiting on the host knows to give up. */
+  private generation = 0
 
   get isActive(): boolean {
     return this.started && this.bridge !== null
@@ -35,8 +50,15 @@ export class GlassesRenderer {
     if (this.started) return this.isActive
     this.started = true
 
-    this.bridge = await acquireBridge()
-    if (!this.bridge) return false
+    // React StrictMode mounts, unmounts and remounts in dev, so `stop()` can
+    // land while we're still waiting here. Carrying on would leave an orphan
+    // renderer fighting the live one over the same page.
+    const generation = this.generation
+    const stopped = () => generation !== this.generation
+
+    const bridge = await acquireBridge()
+    if (!bridge || stopped()) return false
+    this.bridge = bridge
 
     const layout = buildPageLayout()
     const errors = validateLayout(layout)
@@ -66,15 +88,17 @@ export class GlassesRenderer {
         imageObject: layout.imageObject.map((i) => new ImageContainerProperty(i))
       }
 
-      const result = await this.bridge.createStartUpPageContainer(
+      const result = await bridge.createStartUpPageContainer(
         new CreateStartUpPageContainer(page)
       )
+      if (stopped()) return false
 
       if (result !== StartUpPageCreateResult.success) {
         // The host allows one startup page per app session and answers
         // `invalid` to any further create — which every page reload (and React
         // StrictMode's double mount) triggers. Replace the existing page instead.
-        const rebuilt = await this.bridge.rebuildPageContainer(new RebuildPageContainer(page))
+        const rebuilt = await bridge.rebuildPageContainer(new RebuildPageContainer(page))
+        if (stopped()) return false
         if (!rebuilt) {
           glassesLog('error', '❌ Glasses page create and rebuild both failed', result)
           this.bridge = null
@@ -90,16 +114,39 @@ export class GlassesRenderer {
 
     glassesLog('info', '🕶️ Glasses page created')
     await this.listenForGestures()
-    // Force a full paint on the next update.
+    if (stopped()) return false
+
+    // Paint whatever ride is already known — it often loads before the bridge
+    // does — rather than the idle screen. Force a full paint.
     this.lastText = {}
-    await this.update(null)
+    this.refreshTimer = setInterval(() => void this.paint(), REFRESH_MS)
+    await this.paint()
     return true
   }
 
-  /** Push a ride (or the idle screen when null). */
-  async update(ride: RideData | null, now: number = Date.now()): Promise<void> {
-    if (!this.bridge) return
+  /** Push a ride (or the idle screen when null). Kept until the page exists. */
+  update(ride: RideData | null, now?: number): Promise<void> {
+    this.ride = ride
+    return this.paint(now)
+  }
 
+  /**
+   * Paint the latest ride. Serialised, because each paint awaits the bridge
+   * line by line and an overlapping one could finish late and put older text
+   * back over newer.
+   */
+  private paint(now?: number): Promise<void> {
+    this.painting = this.painting
+      .then(() => this.draw(now ?? Date.now()))
+      .catch((error) => glassesLog('warn', '⚠️ Glasses paint failed', error))
+    return this.painting
+  }
+
+  private async draw(now: number): Promise<void> {
+    const bridge = this.bridge
+    if (!bridge) return
+
+    const ride = this.ride
     const next = ride ? formatRide(ride, now) : formatIdle()
     const changed = diffText(this.lastText, next)
 
@@ -109,7 +156,7 @@ export class GlassesRenderer {
 
       try {
         const { TextContainerUpgrade } = await import('@evenrealities/even_hub_sdk')
-        await this.bridge.textContainerUpgrade(
+        await bridge.textContainerUpgrade(
           new TextContainerUpgrade({
             containerID: container.id,
             containerName: container.name,
@@ -122,17 +169,17 @@ export class GlassesRenderer {
     }
 
     this.lastText = next
-    await this.updateMap(ride)
+    await this.updateMap(ride, now)
   }
 
   /**
    * Re-send the map only when its inputs change — it is by far the most
    * expensive thing we transmit.
    */
-  private async updateMap(ride: RideData | null): Promise<void> {
+  private async updateMap(ride: RideData | null, now: number): Promise<void> {
     if (!this.bridge) return
 
-    const rangeMinutes = ride ? rangeRingMinutes(ride) ?? undefined : undefined
+    const rangeMinutes = ride ? rangeRingMinutes(ride, now) ?? undefined : undefined
     const points = ride ? mapPoints(ride) : null
 
     // Rounded to ~10 m: GPS jitter must not re-send the most expensive
@@ -177,7 +224,6 @@ export class GlassesRenderer {
     }
   }
 
-  /** Close the glasses page. */
   /**
    * Double-tap on the glasses closes the app, as it does in every other G2 app.
    * Without a listener the gesture did nothing and the card had no way off.
@@ -212,12 +258,21 @@ export class GlassesRenderer {
   private detach(): void {
     this.unsubscribeEvents?.()
     this.unsubscribeEvents = null
+    this.stopRefresh()
     this.bridge = null
   }
 
+  private stopRefresh(): void {
+    if (this.refreshTimer !== null) clearInterval(this.refreshTimer)
+    this.refreshTimer = null
+  }
+
+  /** Close the glasses page. */
   async stop(): Promise<void> {
+    this.generation += 1
     this.unsubscribeEvents?.()
     this.unsubscribeEvents = null
+    this.stopRefresh()
     if (this.bridge) {
       try {
         await this.bridge.shutDownPageContainer(0)

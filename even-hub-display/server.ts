@@ -59,7 +59,7 @@ app.post('/api/ride-update', (req: Request, res: Response) => {
     }
 
     const ride = result.ride
-    console.log(`📤 Ride update: ${ride.status ?? 'enroute'} · ${ride.driverName} · ETA ${ride.etaMinutes} min`)
+    console.log(`📤 Ride update: ${ride.status ?? 'enroute'} · ${ride.driverName} · ETA ${ride.etaMinutes ?? '?'} min`)
 
     const response: ApiResponse<RideData> = {
       status: 'success',
