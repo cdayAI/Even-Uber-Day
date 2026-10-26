@@ -70,8 +70,9 @@ once it's stale (15 min en route, 5 min waiting at the pickup, 2 h on a trip,
 60 s after it ends). Add
 `"status": "arriving" | "arrived" | "ontrip" | "completed" | "cancelled"` to
 move it through its lifecycle; a bare status update merges onto the ride
-already showing. Outside the Even App the glasses layer logs that it found no
-bridge and does nothing else.
+already showing. Outside the Even App the glasses calls fail harmlessly — a
+"❌ Glasses page create and rebuild both failed" console line is expected — and
+the page works as a normal web app.
 
 ### API (dev server only)
 
