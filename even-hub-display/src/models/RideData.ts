@@ -28,6 +28,12 @@ export function isTerminalStatus(status?: RideStatus): boolean {
 }
 
 /**
+ * Stand-in name for a ride the user started from a screen that didn't show the
+ * driver. Not a driver: a later update naming one is the same ride.
+ */
+export const UNKNOWN_DRIVER = 'Your driver'
+
+/**
  * RideData model matching the iOS companion app + advanced features
  */
 export interface RideData {
@@ -39,7 +45,11 @@ export interface RideData {
   vehicleModel: string
   vehicleColor: string
   licensePlate: string
-  etaMinutes: number
+  /**
+   * Minutes to pickup as of `timestamp`. Null when the ride is known but no
+   * one has said how long — 0 would mean "arriving", which is a claim.
+   */
+  etaMinutes: number | null
   driverLat?: number
   driverLng?: number
   requesterLat?: number

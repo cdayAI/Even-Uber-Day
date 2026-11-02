@@ -302,7 +302,14 @@ describe('mergeRide', () => {
 
   it('returns the incoming ride when there is nothing to merge onto', () => {
     const r = ride()
-    expect(mergeRide(null, r)).toBe(r)
+    expect(mergeRide(null, r)).toEqual(r)
+  })
+
+  it('fills in the fields a sparse first update leaves out', () => {
+    const sparse = { driverName: 'John D.', etaMinutes: 4, timestamp: ride().timestamp } as RideData
+    expect(mergeRide(null, sparse)).toMatchObject({
+      driverRating: 0, vehicleMake: '', vehicleModel: '', vehicleColor: '', licensePlate: ''
+    })
   })
 
   it('re-bases a trip ETA that a later update does not restate', () => {

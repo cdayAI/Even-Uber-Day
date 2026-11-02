@@ -1,7 +1,7 @@
 const EARTH_RADIUS_MILES = 3958.8
 
 /** A coordinate of exactly 0 is valid (Gulf of Guinea) — don't treat it as absent. */
-export function isCoord(value?: number): value is number {
+export function isCoord(value?: number | null): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 

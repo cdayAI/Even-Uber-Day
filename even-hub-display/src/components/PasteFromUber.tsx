@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { RideData } from '../models/RideData'
-import { parseUberText } from '../models/uberText'
+import { parseUberText, pasteUpdate } from '../models/uberText'
 import { SourceMode, applyUpdate } from '../rideSource'
 
 export interface PasteFromUberProps {
@@ -27,17 +27,7 @@ export default function PasteFromUber({ mode, currentRide }: PasteFromUberProps)
       return
     }
 
-    // A first paste may come from any screen — mid-trip included — and may not
-    // name the driver. The store only starts a ride from a named update, so
-    // give it a stand-in rather than refusing the user's own input.
-    const ride = { ...update } as RideData
-    if (!currentRide) {
-      ride.driverName ||= 'Your driver'
-      if (ride.etaMinutes === undefined) ride.etaMinutes = 0
-      ride.status ??= 'enroute'
-    }
-
-    const result = await applyUpdate(mode, ride)
+    const result = await applyUpdate(mode, pasteUpdate(update, currentRide !== null))
     if (result.status === 'updated') {
       setMessage(`✅ ${found.join(' · ')}`)
       setText('')

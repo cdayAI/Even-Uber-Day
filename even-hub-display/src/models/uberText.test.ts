@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { extractClockMinutes, extractStatus, parseUberText } from './uberText'
+import { formatRide } from '../glasses/format'
+import { UNKNOWN_DRIVER } from './RideData'
+import { RideStore, StoredRide } from './rideStore'
+import { computeEta } from './rideTiming'
+import { extractClockMinutes, extractStatus, parseUberText, pasteUpdate } from './uberText'
 
 // 2026-10-15 19:00 local time
 const NOW = new Date(2026, 9, 15, 19, 0, 0).getTime()
@@ -84,5 +88,51 @@ describe('extractClockMinutes', () => {
     expect(extractClockMinutes('Arrive by 7:05 p.m.', NOW)).toBe(5)
     expect(extractClockMinutes('Arrive by 6:00 AM', NOW)).toBeUndefined()
     expect(extractClockMinutes('no time here', NOW)).toBeUndefined()
+  })
+})
+
+describe('pasting into the app', () => {
+  // What PasteFromUber does: parse, fill in a first paste, apply.
+  function paste(store: RideStore, text: string, now: number) {
+    const { update } = parseUberText(text, now)
+    return store.apply(pasteUpdate(update, store.current(now) !== null), now)
+  }
+
+  it('starts a complete ride from a trip screen with no driver card', () => {
+    // Pasted as the first paste, this left the rating undefined; the phone card
+    // threw on it, and the persisted ride kept the app blank on every reopen.
+    const store = new RideStore()
+    paste(store, 'Heading to SFO Terminal 2\n12 min', NOW)
+    const ride = store.current(NOW)!
+    expect(ride).toMatchObject({
+      status: 'ontrip', driverName: UNKNOWN_DRIVER, driverRating: 0,
+      vehicleMake: '', vehicleModel: '', vehicleColor: '', licensePlate: ''
+    })
+    expect(formatRide(ride, NOW).vehicle).toBe('Vehicle details pending')
+  })
+
+  it('does not claim the driver is arriving when the screen gave no time', () => {
+    const store = new RideStore()
+    paste(store, 'Meet at the pickup point\nJohn\n4.92\nSilver Toyota Prius\n8ABC123', NOW)
+    const ride = store.current(NOW)!
+    expect(computeEta(ride, NOW)).toEqual({ minutesRemaining: null, label: 'ON THE WAY', overdue: false })
+    expect(formatRide(ride, NOW).eta).toBe('--')
+  })
+
+  it('keeps what the first paste found when a later one names the driver', () => {
+    const store = new RideStore()
+    paste(store, 'Meet at the pickup point\n4 min\nSilver Toyota Prius\n8ABC123', NOW)
+    paste(store, 'Meet at the pickup point\n3 min\nMaria\n4.95', NOW + 60_000)
+    expect(store.current(NOW + 60_000)).toMatchObject({
+      driverName: 'Maria', driverRating: 4.95, vehicleMake: 'Toyota', licensePlate: '8ABC123', etaMinutes: 3
+    })
+  })
+
+  it('repairs a ride persisted by an earlier version', () => {
+    const saved = {
+      ride: { status: 'ontrip', driverName: UNKNOWN_DRIVER, etaMinutes: 0, timestamp: new Date(NOW).toISOString() },
+      receivedAt: NOW
+    } as unknown as StoredRide
+    expect(new RideStore(saved).current(NOW)).toMatchObject({ driverRating: 0, vehicleMake: '', licensePlate: '' })
   })
 })

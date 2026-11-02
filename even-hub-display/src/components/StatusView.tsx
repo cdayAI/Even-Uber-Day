@@ -30,10 +30,15 @@ export default function StatusView({ lastUpdate, onSimulate }: StatusViewProps) 
 
       <div className="status-info">
         <h3>How it works:</h3>
+        {/* iOS won't let another app read Uber's screen or notifications, so
+            the user's own Shortcut does the reading. See SHORTCUT.md. */}
         <ol>
-          <li>Open the Uber app and order a ride</li>
-          <li>The iOS companion app intercepts the notification</li>
-          <li>Your driver info appears here</li>
+          <li>
+            Once: in Shortcuts, make <strong>Uber → Even</strong> (Take Screenshot →
+            Extract Text from Image → Copy to Clipboard) and set it as your Back Tap
+          </li>
+          <li>With your driver showing in the Uber app, double-tap the back of the phone</li>
+          <li>Come back here and tap <strong>Paste from Uber</strong></li>
           <li>See it on your G2 glasses</li>
         </ol>
       </div>

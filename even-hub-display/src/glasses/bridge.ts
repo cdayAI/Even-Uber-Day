@@ -6,9 +6,11 @@ import { glassesLog } from './log'
  *
  * The SDK only works inside the Even App's WebView, where the host injects
  * `window.flutter_inappwebview.callHandler`. In an ordinary browser —
- * `npm run dev`, or the 576×288 preview — that object is absent and
- * `waitForEvenAppBridge()` waits for a `evenAppBridgeReady` event that will
- * never fire. So we feature-detect first and time out second; the display must
+ * `npm run dev`, or the 576×288 preview — that object is absent, yet SDK
+ * 0.0.16's `waitForEvenAppBridge()` still resolves at once (seen in Chromium).
+ * Every call on it then logs "Flutter handler not available" and page creation
+ * comes back invalid, which is what turns glasses output off there. The
+ * timeout below is for a host that never reports ready: the display must
  * degrade to a plain web page rather than hang.
  */
 

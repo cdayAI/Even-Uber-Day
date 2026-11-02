@@ -93,7 +93,7 @@ export default function SettingsPanel({
             />
             <span className="toggle-label">{autoHideCompleted ? 'On' : 'Off'}</span>
           </div>
-          <p className="setting-hint">Automatically hide ride when driver arrives</p>
+          <p className="setting-hint">Clear the ride card on the phone once the ride ends. The glasses always clear.</p>
         </div>
       </div>
 

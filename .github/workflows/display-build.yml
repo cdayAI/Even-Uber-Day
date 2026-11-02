@@ -31,12 +31,15 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: even-hub-display/package-lock.json
 
-      # `npm ci` needs a committed lockfile; package-lock.json is currently in
-      # .gitignore. Committing it would make these builds reproducible.
+      # Installs exactly what package-lock.json records. A fresh `npm install`
+      # crashes npm 10's resolver on vitest's optional-peer cycle, so the
+      # lockfile was resolved with npm 11 — regenerate it the same way.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Type-check app and server
         run: npm run type-check

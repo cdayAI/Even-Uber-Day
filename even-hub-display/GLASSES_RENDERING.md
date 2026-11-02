@@ -83,18 +83,25 @@ Six containers total — comfortably inside every limit, leaving headroom.
 
 ## Running in a browser
 
-`acquireBridge()` feature-detects `window.flutter_inappwebview.callHandler`
-before doing anything, and races `waitForEvenAppBridge()` against a 5-second
-timeout. Outside the Even App you get one console line —
+Outside the Even App the page behaves like an ordinary web app, and
+`npm run dev` is unaffected — but not by the route you might expect. SDK
+0.0.16's `waitForEvenAppBridge()` resolves in a plain browser too, so the
+5-second timeout in `acquireBridge()` doesn't fire. Calls fail instead, and
+the renderer gives up on the failed page creation. In Chromium the console
+shows:
 
 ```
-ℹ️ Not running in Even App WebView — glasses output disabled
+✅ Even App bridge ready
+[EvenAppBridge] postMessage: Flutter handler not available
+⚠️ Location updates refused
+❌ Glasses page create and rebuild both failed 1
 ```
 
-— and the page behaves like an ordinary web app. `npm run dev` is unaffected.
+That ❌ line is expected in a browser, not a fault.
 
-The SDK is loaded with a dynamic `import()`, so it is code-split out of the main
-bundle and never fetched in a plain browser.
+The SDK is loaded with a dynamic `import()`, so it is code-split into its own
+chunk — though `acquireBridge()` runs on every load, so a browser fetches it
+too.
 
 ## Efficiency
 
@@ -104,6 +111,16 @@ Every update crosses a Bluetooth LE link, so:
   on every 2-second poll.
 - The map image is re-sent only when the coordinates or ETA actually change.
   It is by far the most expensive payload.
+
+The renderer also **repaints itself every 10 seconds**, because the ETA counts
+down from the ride's timestamp while no new data arrives — in the standalone
+app nothing new comes in between pastes. A refresh that changes nothing sends
+nothing; one that rolls the minute over sends the ETA line (and, before
+pickup, the map, whose range ring tracks the ETA).
+
+It also keeps the latest ride from before the page exists. On reopen the ride
+is restored from storage before the host hands over the bridge; the page used
+to come up on the idle screen and stay there until something changed.
 
 ## ✅ Verified on hardware (G2 + iPhone, October 2026)
 
